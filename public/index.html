@@ -485,10 +485,9 @@
                   </svg>
                 </button>
               </div>
-              <div style="color: var(--muted); margin-bottom: 16px; font-size: 13px; line-height: 1.4;">Click this
-                button to copy the room link and collaborate with others in real-time.</div>
+              <div style="color: var(--muted); margin-bottom: 16px; font-size: 13px; line-height: 1.4;">Click below to generate a new link and collaborate with others in real-time.</div>
               <div style="display: flex; align-items: stretch; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; background: var(--panel);">
-                <input type="text" id="shareLinkInput" placeholder="Click new link to generate" value="" readonly style="flex: 1; min-width: 0; border: none; background: transparent; color: var(--text); padding: 8px 12px; font-size: 13px; font-family: 'Inter', sans-serif; outline: none;">
+                <input type="text" id="shareLinkInput" placeholder="Click below to generate link" value="" readonly style="flex: 1; min-width: 0; border: none; background: transparent; color: var(--text); padding: 8px 12px; font-size: 13px; font-family: 'Inter', sans-serif; outline: none;">
                 <button id="copyShareLinkBtn" title="Copy Link" style="background: var(--panel-2); border: none; border-left: 1px solid var(--border); padding: 0 12px; color: var(--text); cursor: pointer; display: flex; align-items: center; justify-content: center; transition: background 0.2s; border-radius: 0;">
                   <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
@@ -497,6 +496,10 @@
               </div>
               <div style="display: flex; justify-content: flex-end; margin-top: 10px;">
                 <button id="newShareLinkBtn" style="background: transparent; color: var(--accent); border: none; font-size: 13px; font-weight: 500; cursor: pointer; padding: 0;">New link?</button>
+              </div>
+              <div id="prevLinksSection" style="display:none; margin-top: 12px; border-top: 1px solid var(--border); padding-top: 10px;">
+                <div style="font-size: 11px; color: var(--muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.05em;">Previous links</div>
+                <div id="prevLinksList" style="display: flex; flex-direction: column; gap: 4px;"></div>
               </div>
             </div>
           </div>
@@ -764,8 +767,33 @@
       navigator.clipboard.writeText(shareLinkInput.value);
     };
 
+    const prevLinksSection = document.getElementById("prevLinksSection");
+    const prevLinksList = document.getElementById("prevLinksList");
+    const generatedLinks = [];
+
+    function addPrevLink(url) {
+      if (generatedLinks.includes(url)) return;
+      generatedLinks.push(url);
+      const item = document.createElement("div");
+      item.style.cssText = "display:flex;align-items:center;gap:6px;padding:5px 8px;border-radius:5px;background:var(--panel);cursor:pointer;transition:background 0.15s;";
+      item.onmouseenter = () => item.style.background = "var(--panel-2)";
+      item.onmouseleave = () => item.style.background = "var(--panel)";
+      const label = document.createElement("span");
+      label.style.cssText = "flex:1;font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:'JetBrains Mono',monospace;";
+      label.textContent = url;
+      item.onclick = () => {
+        shareLinkInput.value = url;
+        navigator.clipboard.writeText(url);
+      };
+      item.appendChild(label);
+      prevLinksList.prepend(item);
+      prevLinksSection.style.display = "block";
+    }
+
     document.getElementById("newShareLinkBtn").onclick = () => {
       const btn = document.getElementById("newShareLinkBtn");
+      // Save current link to history if it exists
+      if (shareLinkInput.value) addPrevLink(shareLinkInput.value);
       btn.innerText = "Generating...";
       setTimeout(() => {
         const newRoom = Math.random().toString(36).substring(2, 9);
@@ -774,14 +802,12 @@
         url.searchParams.set("room", newRoom);
         history.replaceState(null, "", url.toString());
         shareLinkInput.value = url.toString();
-        
         room = newRoom;
         roleText.innerText = "own";
         leaveBtn.style.display = "none";
         socket.emit("join", { room, name });
-        
         btn.innerText = "New link?";
-      }, 600);
+      }, 400);
     };
 
     document.getElementById("leaveBtn").onclick = () => {
