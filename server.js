@@ -14,6 +14,7 @@ app.use(express.static(path.join(__dirname, "public")));
 
 // In-memory room state: { code, cursors: { socketId: {name, pos} } }
 const rooms = {};
+const roomProcesses = {}; // track active child processes per room
 const defaultCode = `#include <bits/stdc++.h>\nusing namespace std;\n\nint main() {\n    cout << "Hello, world!" << endl;\n    return 0;\n}\n`;
 
 function getRoom(roomId) {
@@ -65,8 +66,15 @@ io.on("connection", (socket) => {
   });
 
   socket.on("run", ({ room, code, stdin }) => {
-    io.to(room).emit("terminal", { type: "status", data: "Compiling…\n" });
-    compileAndRun(code, stdin || "", (event) => {
+    // Kill any existing process for this room
+    if (roomProcesses[room]) {
+      try { roomProcesses[room].kill("SIGKILL"); } catch (_) {}
+      delete roomProcesses[room];
+    }
+    // Clear terminal for everyone in the room
+    io.to(room).emit("terminal", { type: "clear" });
+    io.to(room).emit("terminal", { type: "status", data: "Compiling…" });
+    compileAndRun(code, stdin || "", room, (event) => {
       io.to(room).emit("terminal", event);
     });
   });
@@ -82,13 +90,14 @@ io.on("connection", (socket) => {
   });
 });
 
-function compileAndRun(code, stdin, emit) {
+function compileAndRun(code, stdin, room, emit) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "cide-"));
   const srcPath = path.join(tmpDir, "main.cpp");
   const binPath = path.join(tmpDir, "main.out");
   fs.writeFileSync(srcPath, code);
 
-  const compile = spawn("g++", ["-std=c++17", "-I" + path.join(__dirname, "include"), srcPath, "-o", binPath]);
+  const compile = spawn("g++", ["-O0", "-std=c++17", "-I" + path.join(__dirname, "include"), srcPath, "-o", binPath]);
+  roomProcesses[room] = compile;
   let compileErr = "";
   compile.stderr.on("data", (d) => (compileErr += d.toString()));
 
@@ -99,14 +108,16 @@ function compileAndRun(code, stdin, emit) {
       cleanup();
       return;
     }
-    emit({ type: "status", data: "Running…\n" });
+    emit({ type: "status", data: "Running\u2026" });
     const run = spawn(binPath, [], { timeout: 8000 });
+    roomProcesses[room] = run;
     if (stdin) run.stdin.write(stdin);
     run.stdin.end();
 
     run.stdout.on("data", (d) => emit({ type: "stdout", data: d.toString() }));
     run.stderr.on("data", (d) => emit({ type: "stderr", data: d.toString() }));
     run.on("close", (code, signal) => {
+      delete roomProcesses[room];
       emit({
         type: "exit",
         data: signal
@@ -116,12 +127,14 @@ function compileAndRun(code, stdin, emit) {
       cleanup();
     });
     run.on("error", (err) => {
+      delete roomProcesses[room];
       emit({ type: "stderr", data: `Failed to run: ${err.message}\n` });
       cleanup();
     });
   });
 
   compile.on("error", (err) => {
+    delete roomProcesses[room];
     emit({
       type: "stderr",
       data: `g++ not found on this server. Install build-essential (Linux) or Xcode CLT (Mac): ${err.message}\n`,

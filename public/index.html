@@ -921,6 +921,11 @@
     }
 
     socket.on("terminal", (evt) => {
+      if (evt.type === "clear") {
+        term.classList.remove("no-output");
+        term.value = "";
+        return;
+      }
       if (evt.type === "stdout" || evt.type === "stderr") {
         appendTerm(evt.type, evt.data);
       }
@@ -935,8 +940,6 @@
     });
 
     document.getElementById("runBtn").onclick = () => {
-      term.classList.remove("no-output");
-      term.value = "";
       const stdin = document.getElementById("stdinInput").value;
       socket.emit("run", { room, code: editor.getValue(), stdin });
     };
