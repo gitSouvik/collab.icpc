@@ -1,10 +1,6 @@
 const express = require("express");
 const http = require("http");
 const path = require("path");
-const fs = require("fs");
-const os = require("os");
-const crypto = require("crypto");
-const { spawn, spawnSync } = require("child_process");
 const { Server } = require("socket.io");
 
 const app = express();
@@ -13,41 +9,9 @@ const io = new Server(server);
 
 app.use(express.static(path.join(__dirname, "public")));
 
-// ─── Precompile bits/stdc++.h on startup ──────────────────────────────────────
-const INCLUDE_DIR = path.join(__dirname, "include");
-const PCH_SRC = path.join(INCLUDE_DIR, "bits", "stdc++.h");
-const PCH_OUT = path.join(INCLUDE_DIR, "bits", "stdc++.h.gch");
-
-if (!fs.existsSync(PCH_OUT)) {
-  console.log("Precompiling bits/stdc++.h (one-time, speeds up all future runs)…");
-  const pch = spawnSync("g++", ["-O0", "-std=c++17", PCH_SRC, "-o", PCH_OUT]);
-  if (pch.status === 0) {
-    console.log("Precompiled header ready.");
-  } else {
-    console.warn("PCH precompile failed (non-fatal):", pch.stderr?.toString());
-  }
-}
-
-// ─── Binary cache: hash(code) → { binPath, tmpDir } ──────────────────────────
-const binaryCache = new Map(); // hash → { binPath, tmpDir }
-const MAX_CACHE = 20;          // keep at most 20 cached binaries
-
-function hashCode(code) {
-  return crypto.createHash("sha256").update(code).digest("hex");
-}
-
-function evictOldCache() {
-  if (binaryCache.size > MAX_CACHE) {
-    const oldest = binaryCache.keys().next().value;
-    const entry = binaryCache.get(oldest);
-    binaryCache.delete(oldest);
-    fs.rm(entry.tmpDir, { recursive: true, force: true }, () => {});
-  }
-}
-
 // ─── In-memory room state ─────────────────────────────────────────────────────
 const rooms = {};
-const roomProcesses = {};
+const roomAbortControllers = {}; // cancel in-flight Piston requests per room
 const defaultCode = `#include <bits/stdc++.h>\nusing namespace std;\n\nint main() {\n    cout << "Hello, world!" << endl;\n    return 0;\n}\n`;
 
 function getRoom(roomId) {
@@ -58,6 +22,8 @@ function getRoom(roomId) {
 }
 
 const COLORS = ["#5b8dfc", "#f2994a", "#27ae60", "#eb5757", "#9b51e0", "#2d9cdb"];
+
+const PISTON_URL = "https://emkc.org/api/v2/piston/execute";
 
 // ─── Socket.io ────────────────────────────────────────────────────────────────
 io.on("connection", (socket) => {
@@ -92,29 +58,71 @@ io.on("connection", (socket) => {
     socket.to(room).emit("cursor", { from: socket.id, cursor });
   });
 
-  socket.on("run", ({ room, code, stdin }) => {
-    // Kill any existing process for this room
-    if (roomProcesses[room]) {
-      try { roomProcesses[room].kill("SIGKILL"); } catch (_) {}
-      delete roomProcesses[room];
+  socket.on("run", async ({ room, code, stdin }) => {
+    // Cancel any in-flight request for this room
+    if (roomAbortControllers[room]) {
+      roomAbortControllers[room].abort();
     }
+    const controller = new AbortController();
+    roomAbortControllers[room] = controller;
+
     io.to(room).emit("terminal", { type: "clear" });
+    io.to(room).emit("terminal", { type: "status", data: "Running…" });
 
-    const hash = hashCode(code);
-    const cached = binaryCache.get(hash);
+    try {
+      const res = await fetch(PISTON_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
+        body: JSON.stringify({
+          language: "c++",
+          version: "10.2.0",
+          files: [{ name: "main.cpp", content: code }],
+          stdin: stdin || "",
+          compile_timeout: 10000,
+          run_timeout: 5000,
+        }),
+      });
 
-    if (cached && fs.existsSync(cached.binPath)) {
-      // Cache hit — skip compilation entirely
-      io.to(room).emit("terminal", { type: "status", data: "Running…" });
-      runBinary(cached.binPath, stdin || "", room, (event) => {
-        io.to(room).emit("terminal", event);
+      delete roomAbortControllers[room];
+
+      if (!res.ok) {
+        io.to(room).emit("terminal", { type: "stderr", data: `Piston API error: ${res.status}\n` });
+        io.to(room).emit("terminal", { type: "exit" });
+        return;
+      }
+
+      const data = await res.json();
+
+      // Compilation errors
+      if (data.compile && data.compile.stderr) {
+        io.to(room).emit("terminal", { type: "stderr", data: data.compile.stderr });
+      }
+      if (data.compile && data.compile.code !== 0) {
+        io.to(room).emit("terminal", { type: "exit", data: `\nCompilation failed\n` });
+        return;
+      }
+
+      // Program output
+      if (data.run.stdout) {
+        io.to(room).emit("terminal", { type: "stdout", data: data.run.stdout });
+      }
+      if (data.run.stderr) {
+        io.to(room).emit("terminal", { type: "stderr", data: data.run.stderr });
+      }
+
+      io.to(room).emit("terminal", {
+        type: "exit",
+        data: data.run.signal
+          ? `\nTerminated (${data.run.signal})\n`
+          : `\nProcess exited with code ${data.run.code}\n`,
       });
-    } else {
-      // Cache miss — compile then run
-      io.to(room).emit("terminal", { type: "status", data: "Compiling…" });
-      compileAndRun(code, hash, stdin || "", room, (event) => {
-        io.to(room).emit("terminal", event);
-      });
+
+    } catch (err) {
+      if (err.name === "AbortError") return;
+      delete roomAbortControllers[room];
+      io.to(room).emit("terminal", { type: "stderr", data: `Error: ${err.message}\n` });
+      io.to(room).emit("terminal", { type: "exit" });
     }
   });
 
@@ -128,68 +136,6 @@ io.on("connection", (socket) => {
     }
   });
 });
-
-// ─── Compile → cache → run ────────────────────────────────────────────────────
-function compileAndRun(code, hash, stdin, room, emit) {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "cide-"));
-  const srcPath = path.join(tmpDir, "main.cpp");
-  const binPath = path.join(tmpDir, "main.out");
-  fs.writeFileSync(srcPath, code);
-
-  // -O0: fastest compile; PCH is auto-used when stdc++.h.gch exists beside stdc++.h
-  const compile = spawn("g++", [
-    "-O0", "-std=c++17",
-    "-I" + INCLUDE_DIR,
-    srcPath, "-o", binPath,
-  ]);
-  roomProcesses[room] = compile;
-  let compileErr = "";
-  compile.stderr.on("data", (d) => (compileErr += d.toString()));
-
-  compile.on("close", (compileCode) => {
-    if (compileCode !== 0) {
-      emit({ type: "stderr", data: compileErr });
-      emit({ type: "exit", data: `Compilation failed (exit ${compileCode})\n` });
-      fs.rm(tmpDir, { recursive: true, force: true }, () => {});
-      return;
-    }
-    // Store in cache
-    binaryCache.set(hash, { binPath, tmpDir });
-    evictOldCache();
-
-    emit({ type: "status", data: "Running…" });
-    runBinary(binPath, stdin, room, emit);
-  });
-
-  compile.on("error", (err) => {
-    delete roomProcesses[room];
-    emit({ type: "stderr", data: `g++ not found: ${err.message}\n` });
-    fs.rm(tmpDir, { recursive: true, force: true }, () => {});
-  });
-}
-
-function runBinary(binPath, stdin, room, emit) {
-  const run = spawn(binPath, [], { timeout: 8000 });
-  roomProcesses[room] = run;
-  if (stdin) run.stdin.write(stdin);
-  run.stdin.end();
-
-  run.stdout.on("data", (d) => emit({ type: "stdout", data: d.toString() }));
-  run.stderr.on("data", (d) => emit({ type: "stderr", data: d.toString() }));
-  run.on("close", (code, signal) => {
-    delete roomProcesses[room];
-    emit({
-      type: "exit",
-      data: signal
-        ? `\nTerminated (${signal}) — likely timeout or infinite loop\n`
-        : `\nProcess exited with code ${code}\n`,
-    });
-  });
-  run.on("error", (err) => {
-    delete roomProcesses[room];
-    emit({ type: "stderr", data: `Failed to run: ${err.message}\n` });
-  });
-}
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => console.log(`Collab IDE running on http://localhost:${PORT}`));
