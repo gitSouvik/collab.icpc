@@ -78,7 +78,7 @@ io.on("connection", (socket) => {
           compiler: "gcc-head",
           code: code,
           stdin: stdin || "",
-          "compiler-option-raw": "-O0 -std=c++17",
+          "compiler-option-raw": "-std=c++17",
           save: false,
         }),
       });
