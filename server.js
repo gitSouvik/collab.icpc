@@ -23,7 +23,7 @@ function getRoom(roomId) {
 
 const COLORS = ["#5b8dfc", "#f2994a", "#27ae60", "#eb5757", "#9b51e0", "#2d9cdb"];
 
-const PISTON_URL = "https://emkc.org/api/v2/piston/execute";
+const WANDBOX_URL = "https://wandbox.org/api/compile.json";
 
 // ─── Socket.io ────────────────────────────────────────────────────────────────
 io.on("connection", (socket) => {
@@ -70,24 +70,23 @@ io.on("connection", (socket) => {
     io.to(room).emit("terminal", { type: "status", data: "Running…" });
 
     try {
-      const res = await fetch(PISTON_URL, {
+      const res = await fetch(WANDBOX_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         signal: controller.signal,
         body: JSON.stringify({
-          language: "c++",
-          version: "10.2.0",
-          files: [{ name: "main.cpp", content: code }],
+          compiler: "gcc-head",
+          code: code,
           stdin: stdin || "",
-          compile_timeout: 10000,
-          run_timeout: 5000,
+          "compiler-option-raw": "-O0 -std=c++17",
+          save: false,
         }),
       });
 
       delete roomAbortControllers[room];
 
       if (!res.ok) {
-        io.to(room).emit("terminal", { type: "stderr", data: `Piston API error: ${res.status}\n` });
+        io.to(room).emit("terminal", { type: "stderr", data: `Compiler service error: ${res.status}\n` });
         io.to(room).emit("terminal", { type: "exit" });
         return;
       }
@@ -95,27 +94,24 @@ io.on("connection", (socket) => {
       const data = await res.json();
 
       // Compilation errors
-      if (data.compile && data.compile.stderr) {
-        io.to(room).emit("terminal", { type: "stderr", data: data.compile.stderr });
-      }
-      if (data.compile && data.compile.code !== 0) {
-        io.to(room).emit("terminal", { type: "exit", data: `\nCompilation failed\n` });
+      if (data.compiler_error) {
+        io.to(room).emit("terminal", { type: "stderr", data: data.compiler_error });
+        io.to(room).emit("terminal", { type: "exit", data: "\nCompilation failed\n" });
         return;
       }
 
       // Program output
-      if (data.run.stdout) {
-        io.to(room).emit("terminal", { type: "stdout", data: data.run.stdout });
+      if (data.program_output) {
+        io.to(room).emit("terminal", { type: "stdout", data: data.program_output });
       }
-      if (data.run.stderr) {
-        io.to(room).emit("terminal", { type: "stderr", data: data.run.stderr });
+      if (data.program_error) {
+        io.to(room).emit("terminal", { type: "stderr", data: data.program_error });
       }
 
+      const exitCode = parseInt(data.status ?? "0", 10);
       io.to(room).emit("terminal", {
         type: "exit",
-        data: data.run.signal
-          ? `\nTerminated (${data.run.signal})\n`
-          : `\nProcess exited with code ${data.run.code}\n`,
+        data: `\nProcess exited with code ${exitCode}\n`,
       });
 
     } catch (err) {
