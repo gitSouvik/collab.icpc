@@ -131,7 +131,9 @@ io.on("connection", (socket) => {
 
 // ─── Compile → cache → run ────────────────────────────────────────────────────
 function compileAndRun(code, hash, stdin, room, emit) {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "cide-"));
+  // Use Linux RAM disk (/dev/shm) if available for zero disk I/O, otherwise fallback to default tmp
+  const baseTmp = fs.existsSync("/dev/shm") ? "/dev/shm" : os.tmpdir();
+  const tmpDir = fs.mkdtempSync(path.join(baseTmp, "cide-"));
   const srcPath = path.join(tmpDir, "main.cpp");
   const binPath = path.join(tmpDir, "main.out");
   fs.writeFileSync(srcPath, code);
