@@ -88,7 +88,7 @@ function compileAndRun(code, stdin, emit) {
   const binPath = path.join(tmpDir, "main.out");
   fs.writeFileSync(srcPath, code);
 
-  const compile = spawn("g++", ["-O2", "-std=c++17", "-I" + path.join(__dirname, "include"), srcPath, "-o", binPath]);
+  const compile = spawn("g++", ["-std=c++17", "-I" + path.join(__dirname, "include"), srcPath, "-o", binPath]);
   let compileErr = "";
   compile.stderr.on("data", (d) => (compileErr += d.toString()));
 

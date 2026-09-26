@@ -812,9 +812,13 @@
       }
     });
 
+    let stdinTimeout;
     const stdinEl = document.getElementById("stdinInput");
     stdinEl.addEventListener("input", () => {
-      socket.emit("input", { room, input: stdinEl.value });
+      clearTimeout(stdinTimeout);
+      stdinTimeout = setTimeout(() => {
+        socket.emit("input", { room, input: stdinEl.value });
+      }, 150);
     });
 
     socket.on("input", ({ input }) => {
@@ -830,9 +834,13 @@
       applyingRemote = false;
     });
 
+    let editTimeout;
     editor.session.on("change", () => {
       if (applyingRemote) return;
-      socket.emit("edit", { room, code: editor.getValue() });
+      clearTimeout(editTimeout);
+      editTimeout = setTimeout(() => {
+        socket.emit("edit", { room, code: editor.getValue() });
+      }, 150);
     });
 
     socket.on("users", (users) => {
