@@ -1,0 +1,13 @@
+{
+  "name": "collab-cpp-ide",
+  "version": "1.0.0",
+  "description": "Minimal 3-person collaborative C++ online IDE with Ace editor and a live terminal panel",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "socket.io": "^4.7.5"
+  }
+}

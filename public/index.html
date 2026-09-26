@@ -1,0 +1,962 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>collab.cpp</title>
+  <link rel="stylesheet"
+    href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@400;500;600&display=swap">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.32.6/ace.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.32.6/ext-language_tools.min.js"></script>
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/split.js/1.6.5/split.min.js"></script>
+  <style>
+    :root {
+      --bg: #1d1e23;
+      --panel: #1d1e23;
+      --panel-2: #1e222b;
+      --border: #2a2f3a;
+      --text: #e6e8ec;
+      --muted: #868c99;
+      --accent: #5b8dfc;
+      --ok: #4ade80;
+      --err: #f87171;
+      --radius: 6px;
+    }
+
+    html[data-theme="light"] {
+      --bg: #f6f7f9;
+      --panel: #ffffff;
+      --panel-2: #f0f1f4;
+      --border: #dfe2e8;
+      --text: #1a1d24;
+      --muted: #767c8a;
+      --accent: #3b6fe0;
+      --ok: #16a34a;
+      --err: #dc2626;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      height: 100%;
+      margin: 0;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Inter", system-ui, sans-serif;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    header {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 6px 16px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+
+    .logo {
+      font-family: "JetBrains Mono", monospace;
+      font-weight: 600;
+      font-size: 14px;
+      letter-spacing: -0.02em;
+    }
+
+    .logo span {
+      color: var(--accent);
+    }
+
+    .room-input {
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      font-family: "JetBrains Mono", monospace;
+      font-size: 12.5px;
+      padding: 6px 10px;
+      border-radius: var(--radius);
+      width: 140px;
+    }
+
+    .room-input:focus {
+      outline: 1px solid var(--accent);
+    }
+
+    button {
+      font-family: "Inter", sans-serif;
+      font-size: 13px;
+      font-weight: 500;
+      border: none;
+      background: transparent;
+      color: var(--text);
+      padding: 8px;
+      border-radius: 50%;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.2s, color 0.2s;
+    }
+
+    button:hover {
+      background: var(--panel-2);
+      color: var(--accent);
+    }
+
+    button:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 1px;
+    }
+
+    #runBtn {
+      background: #2b67b1;
+      color: #fff;
+      border-radius: 0;
+      padding: 6px 24px;
+      font-weight: 600;
+    }
+
+    #runBtn:hover {
+      filter: brightness(1.1);
+      color: #fff;
+      background: #2b67b1;
+    }
+
+    /* Modal CSS */
+    .modal-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.5);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+    }
+
+    .modal {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      width: 480px;
+      max-width: 90vw;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+    }
+
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .modal-header h2 {
+      margin: 0;
+      font-size: 16px;
+      font-weight: 500;
+    }
+
+    .modal-body {
+      padding: 0 20px 20px;
+    }
+
+    .share-container.force-open .share-popover {
+      opacity: 1;
+      visibility: visible;
+    }
+
+    .share-popover {
+      position: absolute;
+      top: 100%;
+      right: -10px;
+      margin-top: 14px;
+      width: 320px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+      opacity: 0;
+      visibility: hidden;
+      transition: opacity 0.2s;
+      z-index: 100;
+      text-align: left;
+      font-family: 'Inter', sans-serif;
+      cursor: default;
+      pointer-events: none;
+    }
+
+    .share-popover::before {
+      content: '';
+      position: absolute;
+      top: -6px;
+      right: 20px;
+      transform: rotate(45deg);
+      width: 10px;
+      height: 10px;
+      background: var(--bg);
+      border-left: 1px solid var(--border);
+      border-top: 1px solid var(--border);
+    }
+
+    .share-container.force-open .share-popover {
+      pointer-events: auto;
+    }
+
+    #shareBtn {
+      position: relative;
+    }
+
+
+    .setting-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 20px 0;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .setting-row:last-child {
+      border-bottom: none;
+    }
+
+    .setting-info {
+      flex: 1;
+      padding-right: 20px;
+    }
+
+    .setting-title {
+      font-size: 14px;
+      font-weight: 500;
+      margin-bottom: 4px;
+    }
+
+    .setting-desc {
+      font-size: 12.5px;
+      color: var(--muted);
+      line-height: 1.4;
+    }
+
+    .settings-select {
+      background: var(--panel-2);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 6px 10px;
+      font-size: 13px;
+      outline: none;
+      min-width: 120px;
+      cursor: pointer;
+    }
+
+    .font-size-control {
+      display: flex;
+      align-items: center;
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+
+    .font-size-control button {
+      border-radius: 0;
+      padding: 6px 12px;
+      height: 30px;
+      background: transparent;
+      color: var(--text);
+    }
+
+    .font-size-control button:hover {
+      background: var(--border);
+    }
+
+    .font-size-control span {
+      font-size: 13px;
+      min-width: 32px;
+      text-align: center;
+    }
+
+    .settings-btn {
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      background: transparent;
+      color: var(--accent);
+      padding: 6px 12px;
+      justify-content: flex-start;
+      gap: 6px;
+    }
+
+    .settings-btn:hover {
+      border-color: var(--accent);
+      background: transparent;
+      color: var(--accent);
+    }
+
+    .bottom-toggles {
+      display: flex;
+      justify-content: space-around;
+      padding-top: 24px;
+    }
+
+    .toggle-label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 14px;
+      cursor: pointer;
+    }
+
+    .toggle-label input {
+      width: 16px;
+      height: 16px;
+      accent-color: var(--accent);
+      cursor: pointer;
+    }
+
+    main {
+      flex: 1;
+      display: flex;
+      min-height: 0;
+    }
+
+    #editorContainer {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+    }
+
+    #editor {
+      min-width: 0;
+      flex: 1;
+    }
+
+    .gutter {
+      background-color: var(--border);
+      background-repeat: no-repeat;
+      background-position: 50%;
+    }
+
+    .gutter.gutter-horizontal {
+      cursor: col-resize;
+      background-image: linear-gradient(to bottom, var(--panel) 43px, var(--border) 43px);
+    }
+
+    .gutter.gutter-vertical {
+      cursor: row-resize;
+    }
+
+    #terminalPane {
+      min-width: 280px;
+      display: flex;
+      flex-direction: column;
+      background: var(--panel);
+      height: 100%;
+    }
+
+    .pane-section {
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+
+    #inputSection {}
+
+    #outputSection {}
+
+    .term-header {
+      background: #24262d;
+      padding: 8px 14px;
+      font-family: "Inter", sans-serif;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+    }
+
+    #terminal {
+      flex: 1;
+      background: transparent;
+      border: none;
+      color: var(--text);
+      font-family: "JetBrains Mono", monospace;
+      font-size: 12.5px;
+      padding: 12px 14px;
+      resize: none;
+    }
+
+    #terminal.no-output {
+      color: var(--muted);
+    }
+
+    #terminal:focus {
+      outline: none;
+    }
+
+    #stdinInput {
+      flex: 1;
+      background: transparent;
+      border: none;
+      color: var(--text);
+      font-family: "JetBrains Mono", monospace;
+      font-size: 12.5px;
+      padding: 12px 14px;
+      resize: none;
+    }
+
+    #stdinInput:focus {
+      outline: none;
+    }
+
+    #stdinInput::placeholder,
+    #shareLinkInput::placeholder {
+      color: var(--muted);
+    }
+
+    ::-webkit-scrollbar {
+      width: 10px;
+      height: 10px;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: var(--border);
+      border-radius: 5px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    /* Tighter Gutter (Line Numbers) */
+    .ace_gutter-cell {
+      padding-left: 5px !important;
+      padding-right: 6px !important;
+    }
+  </style>
+</head>
+
+<body>
+
+
+
+  <main>
+    <div id="editorContainer">
+      <div
+        style="display: flex; align-items: center; justify-content: flex-end; height: 44px; min-height: 44px; padding: 0 6px 0 14px; background: var(--panel); border-bottom: 1px solid var(--border); box-sizing: border-box;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <div class="share-container" id="shareContainer"
+            style="position: relative; display: flex; align-items: center;">
+            <button id="shareBtn" style="color: #82b0ff;">
+              <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="18" cy="5" r="3"></circle>
+                <circle cx="6" cy="12" r="3"></circle>
+                <circle cx="18" cy="19" r="3"></circle>
+                <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line>
+                <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line>
+              </svg>
+            </button>
+            <div class="share-popover">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                <div style="font-weight: 600; font-size: 15px; color: var(--text);">Live Share</div>
+                <button id="closeShareBtn" title="Close"
+                  style="padding: 4px; background: transparent; color: var(--text); border: none; cursor: pointer; border-radius: 50%;">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
+                    stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                  </svg>
+                </button>
+              </div>
+              <div style="color: var(--muted); margin-bottom: 16px; font-size: 13px; line-height: 1.4;">Click this
+                button to copy the room link and collaborate with others in real-time.</div>
+              <div style="display: flex; align-items: stretch; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; background: var(--panel);">
+                <input type="text" id="shareLinkInput" placeholder="Click new link to generate" value="" readonly style="flex: 1; min-width: 0; border: none; background: transparent; color: var(--text); padding: 8px 12px; font-size: 13px; font-family: 'Inter', sans-serif; outline: none;">
+                <button id="copyShareLinkBtn" title="Copy Link" style="background: var(--panel-2); border: none; border-left: 1px solid var(--border); padding: 0 12px; color: var(--text); cursor: pointer; display: flex; align-items: center; justify-content: center; transition: background 0.2s; border-radius: 0;">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                  </svg>
+                </button>
+              </div>
+              <div style="display: flex; justify-content: flex-end; margin-top: 10px;">
+                <button id="newShareLinkBtn" style="background: transparent; color: var(--accent); border: none; font-size: 13px; font-weight: 500; cursor: pointer; padding: 0;">New link?</button>
+              </div>
+            </div>
+          </div>
+          <button id="downloadBtn" title="Download code">
+            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="7 10 12 15 17 10"></polyline>
+              <line x1="12" y1="15" x2="12" y2="3"></line>
+            </svg>
+          </button>
+          <button id="resetBtn" title="Reset code">
+            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="23 4 23 10 17 10"></polyline>
+              <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+            </svg>
+          </button>
+          <button id="settingsBtn" title="Editor Settings">
+            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="3"></circle>
+              <path
+                d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z">
+              </path>
+            </svg>
+          </button>
+        </div>
+      </div>
+      <div id="editor"></div>
+    </div>
+    <div id="terminalPane">
+      <div
+        style="display: flex; align-items: center; justify-content: space-between; height: 44px; min-height: 44px; padding: 0 14px 0 0; background: var(--panel); border-bottom: 1px solid var(--border); box-sizing: border-box;">
+        <button id="runBtn" title="Run code" style="padding: 6px 32px; font-weight: 600;">Run</button>
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <span id="roomRoleText"
+            style="color: var(--muted); font-size: 13px; font-weight: 500; font-family: 'Inter', sans-serif;"></span>
+          <button id="leaveBtn" title="Leave Room" style="padding: 4px;">
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none"
+              stroke-linecap="round" stroke-linejoin="round">
+              <path d="M13 4l6 2v12l-6 2v-16z" stroke="var(--err)" stroke-width="2" />
+              <circle cx="7" cy="7" r="2" stroke="currentColor" stroke-width="2" />
+              <path d="M7 9v4" stroke="currentColor" stroke-width="2" />
+              <path d="M4 12l3-2 3 2" stroke="currentColor" stroke-width="2" />
+              <path d="M4 18l3-5 3 5" stroke="currentColor" stroke-width="2" />
+            </svg>
+          </button>
+        </div>
+      </div>
+      <div id="splitContainer" style="flex: 1; display: flex; flex-direction: column; min-height: 0;">
+        <div class="pane-section" id="inputSection">
+          <div class="term-header">
+            <span>Input</span>
+          </div>
+          <textarea id="stdinInput" placeholder="Enter input here"></textarea>
+        </div>
+        <div class="pane-section" id="outputSection">
+          <div class="term-header">
+            <span>Output</span>
+            <span id="statusDot" style="color: var(--muted); font-weight: 500;">idle</span>
+          </div>
+          <textarea id="terminal" readonly></textarea>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <div id="resetModal" class="modal-overlay">
+    <div class="modal" style="max-width: 400px;">
+      <div class="modal-header">
+        <h2>Reset Code</h2>
+        <button id="closeResetBtn" title="Close" style="padding: 4px;">
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+      <div class="modal-body" style="padding-top: 20px;">
+        <div
+          style="font-size: 14px; color: var(--muted); margin-bottom: 24px; line-height: 1.5; font-family: 'Inter', sans-serif;">
+          Are you sure you want to reset your code? This will replace your current code with the default template.
+        </div>
+        <div style="display: flex; gap: 12px; justify-content: flex-end;">
+          <button id="cancelResetBtn"
+            style="border: 1px solid var(--border); background: transparent; color: var(--text); padding: 8px 16px; border-radius: 4px; font-weight: 500; font-size: 13px; cursor: pointer;">Cancel</button>
+          <button id="confirmResetBtn"
+            style="border: none; background: #ef4444; color: white; padding: 8px 16px; border-radius: 4px; font-weight: 500; font-size: 13px; cursor: pointer;">Reset
+            Code</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="settingsModal" class="modal-overlay">
+    <div class="modal">
+      <div class="modal-header">
+        <h2>Editor Settings</h2>
+        <button id="closeSettingsBtn" title="Close" style="padding: 4px;">
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div class="setting-row">
+          <div class="setting-info">
+            <div class="setting-title">Tab Size</div>
+            <div class="setting-desc">Choose the width of a tab character.</div>
+          </div>
+          <select id="tabSizeSelect" class="settings-select">
+            <option value="2">2 spaces</option>
+            <option value="4">4 spaces</option>
+            <option value="8">8 spaces</option>
+          </select>
+        </div>
+        <div class="setting-row">
+          <div class="setting-info">
+            <div class="setting-title">Font Size</div>
+            <div class="setting-desc">Choose your preferred font size for the code editor.</div>
+          </div>
+          <div class="font-size-control">
+            <button id="fontMinus">-</button>
+            <span id="fontDisplay">14</span>
+            <button id="fontPlus">+</button>
+          </div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-info">
+            <div class="setting-title">Save Template</div>
+            <div class="setting-desc">Save your current code as a template for future use.</div>
+          </div>
+          <button id="saveTemplateBtn" class="settings-btn">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
+              <polyline points="17 21 17 13 7 13 7 21"></polyline>
+              <polyline points="7 3 7 8 15 8"></polyline>
+            </svg>
+            Save Template
+          </button>
+        </div>
+        <div class="setting-row bottom-toggles">
+          <label class="toggle-label">
+            Soft Wrap <input type="checkbox" id="softWrapCheck" />
+          </label>
+          <label class="toggle-label">
+            Autocomplete <input type="checkbox" id="autocompleteCheck" checked />
+          </label>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ---------- theme ----------
+    const root = document.documentElement;
+    function setTheme(t) {
+      root.setAttribute("data-theme", t);
+      localStorage.setItem("cide-theme", t);
+      editor.setTheme(t === "dark" ? "ace/theme/tomorrow_night" : "ace/theme/tomorrow");
+    }
+
+    const settingsModal = document.getElementById("settingsModal");
+    document.getElementById("settingsBtn").onclick = () => settingsModal.style.display = "flex";
+    document.getElementById("closeSettingsBtn").onclick = () => settingsModal.style.display = "none";
+    settingsModal.onclick = (e) => { if (e.target === settingsModal) settingsModal.style.display = "none"; };
+
+    // ---------- editor ----------
+    const editor = ace.edit("editor");
+    editor.session.setMode("ace/mode/c_cpp");
+
+    // Apply saved settings
+    const savedTheme = localStorage.getItem("cide-theme") || "dark";
+    setTheme(savedTheme);
+
+    const fontDisplay = document.getElementById("fontDisplay");
+    let fontSize = parseInt(localStorage.getItem("cide-font")) || 14;
+    editor.setFontSize(fontSize);
+    fontDisplay.textContent = fontSize;
+
+    const tabSizeSelect = document.getElementById("tabSizeSelect");
+    tabSizeSelect.value = localStorage.getItem("cide-tab") || "4";
+    editor.session.setTabSize(parseInt(tabSizeSelect.value));
+
+    const softWrapCheck = document.getElementById("softWrapCheck");
+    softWrapCheck.checked = localStorage.getItem("cide-wrap") === "true";
+    editor.session.setUseWrapMode(softWrapCheck.checked);
+
+    const autocompleteCheck = document.getElementById("autocompleteCheck");
+    autocompleteCheck.checked = localStorage.getItem("cide-autocomplete") !== "false"; // default true
+    editor.setOptions({
+      showPrintMargin: false,
+      enableBasicAutocompletion: true,
+      enableLiveAutocompletion: autocompleteCheck.checked
+    });
+
+    // Settings event listeners
+    document.getElementById("fontMinus").onclick = () => { if (fontSize > 8) { fontSize--; updateFont(); } };
+    document.getElementById("fontPlus").onclick = () => { if (fontSize < 36) { fontSize++; updateFont(); } };
+    function updateFont() {
+      fontDisplay.textContent = fontSize;
+      localStorage.setItem("cide-font", fontSize);
+      editor.setFontSize(fontSize);
+    }
+
+    tabSizeSelect.onchange = (e) => {
+      localStorage.setItem("cide-tab", e.target.value);
+      editor.session.setTabSize(parseInt(e.target.value));
+    };
+    softWrapCheck.onchange = (e) => {
+      localStorage.setItem("cide-wrap", e.target.checked);
+      editor.session.setUseWrapMode(e.target.checked);
+    };
+    autocompleteCheck.onchange = (e) => {
+      localStorage.setItem("cide-autocomplete", e.target.checked);
+      editor.setOptions({ enableLiveAutocompletion: e.target.checked });
+    };
+
+    // ---------- room / identity ----------
+    const params = new URLSearchParams(location.search);
+    let room = params.get("room");
+    const roleText = document.getElementById("roomRoleText");
+    const leaveBtn = document.getElementById("leaveBtn");
+
+    if (!room) {
+      room = Math.random().toString(36).substring(2, 9);
+      sessionStorage.setItem("cide-owned-room", room);
+      const url = new URL(location.href);
+      url.searchParams.set("room", room);
+      history.replaceState(null, "", url.toString());
+    }
+
+    if (sessionStorage.getItem("cide-owned-room") === room) {
+      roleText.innerText = "own";
+      leaveBtn.style.display = "none";
+    } else {
+      roleText.innerText = "sharing";
+      leaveBtn.style.display = "";
+    }
+
+    const name = localStorage.getItem("cide-name") || "user" + Math.floor(Math.random() * 900 + 100);
+
+    const shareContainer = document.getElementById("shareContainer");
+    const copyShareLinkBtn = document.getElementById("copyShareLinkBtn");
+    const shareLinkInput = document.getElementById("shareLinkInput");
+
+    document.getElementById("shareContainer").onmouseenter = () => {
+      shareContainer.classList.add("force-open");
+    };
+
+    document.getElementById("shareBtn").onclick = () => {
+      shareContainer.classList.add("force-open");
+    };
+
+    document.getElementById("closeShareBtn").onclick = () => {
+      shareContainer.classList.remove("force-open");
+    };
+
+    copyShareLinkBtn.onclick = () => {
+      navigator.clipboard.writeText(shareLinkInput.value);
+    };
+
+    document.getElementById("newShareLinkBtn").onclick = () => {
+      const btn = document.getElementById("newShareLinkBtn");
+      btn.innerText = "Generating...";
+      setTimeout(() => {
+        const newRoom = Math.random().toString(36).substring(2, 9);
+        sessionStorage.setItem("cide-owned-room", newRoom);
+        const url = new URL(location.href);
+        url.searchParams.set("room", newRoom);
+        history.replaceState(null, "", url.toString());
+        shareLinkInput.value = url.toString();
+        
+        room = newRoom;
+        roleText.innerText = "own";
+        leaveBtn.style.display = "none";
+        socket.emit("join", { room, name });
+        
+        btn.innerText = "New link?";
+      }, 600);
+    };
+
+    document.getElementById("leaveBtn").onclick = () => {
+      location.href = location.pathname;
+    };
+
+    // ---------- socket ----------
+    const socket = io();
+    let applyingRemote = false;
+
+    socket.on("connect", () => socket.emit("join", { room, name }));
+
+    socket.on("init", ({ code, input, isNew }) => {
+      applyingRemote = true;
+      let finalCode = code;
+      if (isNew) {
+        const localTemplate = localStorage.getItem("cide-template");
+        if (localTemplate) {
+          finalCode = localTemplate;
+          setTimeout(() => socket.emit("edit", { room, code: finalCode }), 100);
+        }
+      }
+      editor.setValue(finalCode, -1);
+      applyingRemote = false;
+
+      if (input !== undefined) {
+        document.getElementById("stdinInput").value = input;
+      }
+    });
+
+    const stdinEl = document.getElementById("stdinInput");
+    stdinEl.addEventListener("input", () => {
+      socket.emit("input", { room, input: stdinEl.value });
+    });
+
+    socket.on("input", ({ input }) => {
+      stdinEl.value = input;
+    });
+
+    socket.on("edit", ({ code }) => {
+      applyingRemote = true;
+      const cursor = editor.getCursorPosition();
+      editor.setValue(code, -1);
+      editor.moveCursorToPosition(cursor);
+      editor.clearSelection();
+      applyingRemote = false;
+    });
+
+    editor.session.on("change", () => {
+      if (applyingRemote) return;
+      socket.emit("edit", { room, code: editor.getValue() });
+    });
+
+    socket.on("users", (users) => {
+      // Hidden user profile dots
+    });
+
+    socket.on("system", (msg) => {
+      // Hidden system messages to keep output clean
+    });
+
+
+    document.getElementById("downloadBtn").onclick = async () => {
+      try {
+        if (window.showSaveFilePicker) {
+          const handle = await window.showSaveFilePicker({
+            suggestedName: 'main.cpp',
+            types: [{
+              description: 'C++ Source File',
+              accept: { 'text/plain': ['.cpp'] },
+            }],
+          });
+          const writable = await handle.createWritable();
+          await writable.write(editor.getValue());
+          await writable.close();
+        } else {
+          const blob = new Blob([editor.getValue()], { type: "text/plain" });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = "main.cpp";
+          a.click();
+          URL.revokeObjectURL(url);
+        }
+      } catch (err) {
+        if (err.name !== 'AbortError') {
+          console.error('Download failed:', err);
+        }
+      }
+    };
+
+    const resetModal = document.getElementById("resetModal");
+    document.getElementById("resetBtn").onclick = () => {
+      resetModal.style.display = "flex";
+    };
+
+    document.getElementById("cancelResetBtn").onclick = () => {
+      resetModal.style.display = "none";
+    };
+
+    document.getElementById("closeResetBtn").onclick = () => {
+      resetModal.style.display = "none";
+    };
+
+    document.getElementById("confirmResetBtn").onclick = () => {
+      resetModal.style.display = "none";
+      const localTemplate = localStorage.getItem("cide-template");
+      const code = localTemplate || `#include <bits/stdc++.h>\nusing namespace std;\n\nint main() {\n    cout << "Hello, world!" << endl;\n    return 0;\n}\n`;
+      editor.setValue(code, -1);
+      socket.emit("edit", { room, code: editor.getValue() });
+    };
+
+    document.getElementById("saveTemplateBtn").onclick = () => {
+      localStorage.setItem("cide-template", editor.getValue());
+      const btn = document.getElementById("saveTemplateBtn");
+      const oldHTML = btn.innerHTML;
+      btn.innerHTML = "Saved!";
+      setTimeout(() => btn.innerHTML = oldHTML, 2000);
+    };
+
+    // ---------- terminal / run ----------
+    const term = document.getElementById("terminal");
+    const statusDot = document.getElementById("statusDot");
+
+    function appendTerm(type, data) {
+      term.classList.remove("no-output");
+      term.value += data;
+      term.scrollTop = term.scrollHeight;
+    }
+
+    socket.on("terminal", (evt) => {
+      if (evt.type === "stdout" || evt.type === "stderr") {
+        appendTerm(evt.type, evt.data);
+      }
+      if (evt.type === "status") statusDot.textContent = evt.data.trim();
+      if (evt.type === "exit") {
+        statusDot.textContent = "idle";
+        if (term.value.trim() === "") {
+          term.value = "No output";
+          term.classList.add("no-output");
+        }
+      }
+    });
+
+    document.getElementById("runBtn").onclick = () => {
+      term.classList.remove("no-output");
+      term.value = "";
+      const stdin = document.getElementById("stdinInput").value;
+      socket.emit("run", { room, code: editor.getValue(), stdin });
+    };
+
+    // Ctrl/Cmd+Enter to run
+    editor.commands.addCommand({
+      name: "run",
+      bindKey: { win: "Ctrl-Enter", mac: "Command-Enter" },
+      exec: () => document.getElementById("runBtn").click(),
+    });
+
+    // ---------- Split.js ----------
+    Split(['#editorContainer', '#terminalPane'], {
+      sizes: [60, 40],
+      minSize: [200, 200],
+      gutterSize: 6,
+      cursor: 'col-resize',
+      onDrag: () => editor.resize()
+    });
+
+    Split(['#inputSection', '#outputSection'], {
+      direction: 'vertical',
+      sizes: [30, 70],
+      minSize: [100, 100],
+      gutterSize: 6,
+      cursor: 'row-resize'
+    });
+  </script>
+</body>
+
+</html>
