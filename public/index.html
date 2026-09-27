@@ -214,6 +214,17 @@
       border-top: 1px solid var(--border);
     }
 
+    /* Invisible bridge to prevent mouseleave when moving to popup */
+    .share-popover::after {
+      content: '';
+      position: absolute;
+      top: -14px;
+      left: 0;
+      right: 0;
+      height: 14px;
+      background: transparent;
+    }
+
     .share-container.force-open .share-popover {
       pointer-events: auto;
     }
@@ -354,7 +365,21 @@
 
     .gutter.gutter-horizontal {
       cursor: col-resize;
+      position: relative;
       background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="6" height="30"><circle cx="1.5" cy="3" r="1.2" fill="%23868c99"/><circle cx="4.5" cy="3" r="1.2" fill="%23868c99"/><circle cx="1.5" cy="9" r="1.2" fill="%23868c99"/><circle cx="4.5" cy="9" r="1.2" fill="%23868c99"/><circle cx="1.5" cy="15" r="1.2" fill="%23868c99"/><circle cx="4.5" cy="15" r="1.2" fill="%23868c99"/><circle cx="1.5" cy="21" r="1.2" fill="%23868c99"/><circle cx="4.5" cy="21" r="1.2" fill="%23868c99"/><circle cx="1.5" cy="27" r="1.2" fill="%23868c99"/><circle cx="4.5" cy="27" r="1.2" fill="%23868c99"/></svg>');
+    }
+
+    .gutter.gutter-horizontal::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 44px;
+      background-color: var(--panel);
+      border-bottom: 1px solid var(--border);
+      box-sizing: border-box;
+      pointer-events: none;
     }
 
     .gutter.gutter-vertical {
@@ -401,6 +426,7 @@
       font-size: 12.5px;
       padding: 12px 14px;
       resize: none;
+      overflow-y: overlay;
     }
 
     #terminal.no-output {
@@ -420,6 +446,7 @@
       font-size: 12.5px;
       padding: 12px 14px;
       resize: none;
+      overflow-y: overlay;
     }
 
     #stdinInput:focus {
@@ -441,12 +468,14 @@
       border-radius: 0;
     }
 
-    *:hover::-webkit-scrollbar-thumb {
+    .is-scrolling::-webkit-scrollbar-thumb,
+    .is-scrolling ::-webkit-scrollbar-thumb {
       background: rgba(0, 0, 0, 0.4);
     }
 
-    *:hover::-webkit-scrollbar-thumb:hover {
-      background: rgba(0, 0, 0, 0.8);
+    ::-webkit-scrollbar-thumb:hover,
+    ::-webkit-scrollbar-thumb:active {
+      background: rgba(0, 0, 0, 0.8) !important;
     }
 
     ::-webkit-scrollbar-track {
@@ -457,6 +486,15 @@
     .ace_gutter-cell {
       padding-left: 5px !important;
       padding-right: 6px !important;
+    }
+
+    /* Overlay scrollbar fix for Ace Editor */
+    .ace_scroller {
+      right: 0 !important;
+    }
+    
+    .ace_scrollbar-v {
+      z-index: 10 !important;
     }
   </style>
 </head>
@@ -766,6 +804,10 @@
       shareContainer.classList.add("force-open");
     };
 
+    document.getElementById("shareContainer").onmouseleave = () => {
+      shareContainer.classList.remove("force-open");
+    };
+
     document.getElementById("shareBtn").onclick = () => {
       shareContainer.classList.add("force-open");
     };
@@ -971,7 +1013,7 @@
     function appendTerm(type, data) {
       term.classList.remove("no-output");
       term.value += data;
-      term.scrollTop = term.scrollHeight;
+      term.scrollTop = 0;
     }
 
     socket.on("terminal", (evt) => {
@@ -1005,6 +1047,28 @@
       exec: () => document.getElementById("runBtn").click(),
     });
 
+    // ---------- Scrolling Logic ----------
+    function createScrollTracker(el) {
+      let timeout;
+      return function() {
+        el.classList.add('is-scrolling');
+        clearTimeout(timeout);
+        timeout = setTimeout(() => {
+          el.classList.remove('is-scrolling');
+        }, 1000);
+      };
+    }
+    
+    const editorScrollTracker = createScrollTracker(document.getElementById('editorContainer'));
+    editor.session.on('changeScrollTop', editorScrollTracker);
+    editor.session.on('changeScrollLeft', editorScrollTracker);
+    
+    const termEl = document.getElementById('terminal');
+    termEl.addEventListener('scroll', createScrollTracker(termEl));
+    
+    const stdinEl2 = document.getElementById('stdinInput');
+    stdinEl2.addEventListener('scroll', createScrollTracker(stdinEl2));
+
     // ---------- Split.js ----------
     Split(['#editorContainer', '#terminalPane'], {
       sizes: [60, 40],
@@ -1016,7 +1080,7 @@
 
     Split(['#inputSection', '#outputSection'], {
       direction: 'vertical',
-      sizes: [30, 70],
+      sizes: [20, 80],
       minSize: [100, 100],
       gutterSize: 6,
       cursor: 'row-resize'
