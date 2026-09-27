@@ -103,7 +103,7 @@ io.on("connection", (socket) => {
     const isNew = !rooms[currentRoom];
     const r = getRoom(currentRoom);
     const color = COLORS[Object.keys(r.users).length % COLORS.length];
-    r.users[socket.id] = { name: name || "Anonymous", color };
+    r.users[socket.id] = { id: socket.id, name: name || "Anonymous", color };
 
     socket.emit("init", { code: r.code, input: r.input, users: Object.values(r.users), isNew });
     io.to(currentRoom).emit("users", Object.values(r.users));

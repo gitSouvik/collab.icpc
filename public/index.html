@@ -447,6 +447,27 @@
       white-space: pre-wrap;
     }
 
+    .remote-cursor {
+      position: absolute;
+      z-index: 20;
+      border-left: 2px solid;
+      pointer-events: none;
+      margin-left: -1px; /* Align slightly */
+      animation: remote-blink 1s step-end infinite;
+    }
+    
+    .remote-cursor-c0 { border-color: #5b8dfc; }
+    .remote-cursor-c1 { border-color: #f2994a; }
+    .remote-cursor-c2 { border-color: #27ae60; }
+    .remote-cursor-c3 { border-color: #eb5757; }
+    .remote-cursor-c4 { border-color: #9b51e0; }
+    .remote-cursor-c5 { border-color: #2d9cdb; }
+    
+    @keyframes remote-blink {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0; }
+    }
+
     #terminal.no-output {
       color: var(--muted);
     }
@@ -568,6 +589,13 @@
               </div>
             </div>
           </div>
+          <button id="multiCursorBtn" title="Toggle Multi-Cursor" style="color: var(--muted);">
+            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"></path>
+              <path d="M13 13l6 6"></path>
+            </svg>
+          </button>
           <button id="downloadBtn" title="Download code">
             <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none"
               stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -906,7 +934,7 @@
         const localTemplate = localStorage.getItem("cide-template");
         if (localTemplate) {
           finalCode = localTemplate;
-          setTimeout(() => socket.emit("edit", { room, code: finalCode }), 100);
+          setTimeout(() => socket.emit("edit", { room, deltas: [], fullCodeFallback: finalCode }), 100);
         }
       }
       editor.setValue(finalCode || "", -1);
@@ -957,8 +985,75 @@
       }, 50);
     });
 
+    let cursorTimeout;
+    let showRemoteCursors = false;
+    
+    document.getElementById("multiCursorBtn").onclick = () => {
+      showRemoteCursors = !showRemoteCursors;
+      const btn = document.getElementById("multiCursorBtn");
+      if (showRemoteCursors) {
+        btn.style.color = "#82b0ff";
+      } else {
+        btn.style.color = "var(--muted)";
+        // Clear all markers
+        for (const id in remoteCursors) {
+          if (remoteCursors[id].markerId) {
+            editor.session.removeMarker(remoteCursors[id].markerId);
+            remoteCursors[id].markerId = null;
+          }
+        }
+      }
+    };
+
+    editor.selection.on("changeCursor", () => {
+      if (!showRemoteCursors) return;
+      clearTimeout(cursorTimeout);
+      cursorTimeout = setTimeout(() => {
+        const cursor = editor.getCursorPosition();
+        socket.emit("cursor", { room, cursor });
+      }, 50);
+    });
+
+    const remoteCursors = {}; // { [socketId]: { markerId, pos } }
+    let userColors = {};
+    const SERVER_COLORS = ["#5b8dfc", "#f2994a", "#27ae60", "#eb5757", "#9b51e0", "#2d9cdb"];
+    
+    socket.on("cursor", ({ from, cursor }) => {
+      if (!showRemoteCursors) return;
+      
+      if (!remoteCursors[from]) {
+        remoteCursors[from] = {};
+      }
+      
+      const rc = remoteCursors[from];
+      if (rc.markerId) {
+        editor.session.removeMarker(rc.markerId);
+      }
+      rc.pos = cursor;
+      
+      const cIndex = userColors[from] !== undefined && userColors[from] !== -1 ? userColors[from] : 0;
+      
+      const Range = ace.require("ace/range").Range;
+      const r = new Range(cursor.row, cursor.column, cursor.row, cursor.column + 1);
+      rc.markerId = editor.session.addMarker(r, `remote-cursor remote-cursor-c${cIndex}`, "text", true);
+    });
+
     socket.on("users", (users) => {
-      // Hidden user profile dots
+      userColors = {};
+      users.forEach(u => {
+        if (u.id) userColors[u.id] = SERVER_COLORS.indexOf(u.color);
+      });
+      
+      // Clean up disconnected cursors
+      const activeIds = users.map(u => u.id);
+      for (const id in remoteCursors) {
+        if (!activeIds.includes(id)) {
+          if (remoteCursors[id].markerId) {
+            editor.session.removeMarker(remoteCursors[id].markerId);
+          }
+          delete remoteCursors[id];
+        }
+      }
     });
 
     socket.on("system", (msg) => {
