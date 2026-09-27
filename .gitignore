@@ -2,3 +2,6 @@ node_modules/
 .env
 *.gch
 rooms/
+
+test*
+!test_*.js
