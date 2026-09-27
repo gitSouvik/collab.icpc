@@ -188,6 +188,7 @@ function compileAndRun(code, hash, stdin, room, emit) {
   fs.writeFileSync(srcPath, code);
 
   // -O0: fastest compile; PCH is auto-used when stdc++.h.gch exists beside stdc++.h
+  emit({ type: "status", data: "Compiling..." });
   const compile = spawn("g++", [
     "-O0", "-std=c++17",
     "-I" + INCLUDE_DIR,

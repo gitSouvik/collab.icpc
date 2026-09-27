@@ -1036,9 +1036,6 @@
       }
       if (evt.type === "status") {
         statusDot.textContent = evt.data.trim();
-        if (evt.data.trim() === "Running…") {
-          term.innerHTML = `<div class="output-content" style="color: var(--muted);">Running...</div>`;
-        }
       }
       if (evt.type === "exit") {
         statusDot.textContent = "idle";
