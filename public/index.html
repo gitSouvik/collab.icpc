@@ -424,9 +424,27 @@
       color: var(--text);
       font-family: "JetBrains Mono", monospace;
       font-size: 12.5px;
-      padding: 12px 14px;
-      resize: none;
       overflow-y: overlay;
+      word-break: break-all;
+    }
+
+    .output-status-box {
+      background: #c3c3c3;
+      color: #333;
+      padding: 12px 14px;
+      font-family: 'Inter', sans-serif;
+      font-size: 14px;
+      border-left: 5px solid #6b7280;
+    }
+
+    .output-status-box b {
+      font-weight: 700;
+      color: #1a1a1a;
+    }
+
+    .output-content {
+      padding: 12px 14px;
+      white-space: pre-wrap;
     }
 
     #terminal.no-output {
@@ -496,26 +514,6 @@
     .ace_scrollbar-v {
       z-index: 10 !important;
     }
-
-    #statusBanner {
-      display: none;
-      align-items: center;
-      padding: 10px 16px;
-      background: #c5c5c5;
-      font-family: 'Inter', sans-serif;
-      font-size: 14px;
-      border-left: 6px solid #10b981;
-      position: absolute;
-      bottom: 0;
-      left: 0;
-      right: 0;
-      box-sizing: border-box;
-      z-index: 5;
-    }
-    
-    #statusBanner.success { border-left-color: #10b981; }
-    #statusBanner.error, #statusBanner.compile_error { border-left-color: #ef4444; }
-    #statusBanner.tle { border-left-color: #f59e0b; }
   </style>
 </head>
 
@@ -624,16 +622,12 @@
           </div>
           <textarea id="stdinInput" placeholder="Enter input here"></textarea>
         </div>
-        <div class="pane-section" id="outputSection" style="position: relative;">
+        <div class="pane-section" id="outputSection">
           <div class="term-header">
             <span>Output</span>
             <span id="statusDot" style="color: var(--muted); font-weight: 500;">idle</span>
           </div>
-          <textarea id="terminal" readonly></textarea>
-          <div id="statusBanner">
-            <strong style="font-weight: 600; margin-right: 6px; color: #222;">Status :</strong> 
-            <span id="statusBannerText" style="color: #444;"></span>
-          </div>
+          <div id="terminal"></div>
         </div>
       </div>
     </div>
@@ -1034,46 +1028,41 @@
     const term = document.getElementById("terminal");
     const statusDot = document.getElementById("statusDot");
 
-    function appendTerm(type, data) {
-      term.classList.remove("no-output");
-      term.value += data;
-      term.scrollTop = 0;
-    }
-
     socket.on("terminal", (evt) => {
       if (evt.type === "clear") {
         term.classList.remove("no-output");
-        term.value = "";
-        document.getElementById("statusBanner").style.display = "none";
+        term.innerHTML = "";
         return;
       }
-      if (evt.type === "stdout" || evt.type === "stderr") {
-        appendTerm(evt.type, evt.data);
+      if (evt.type === "status") {
+        statusDot.textContent = evt.data.trim();
+        if (evt.data.trim() === "Running…") {
+          term.innerHTML = `<div class="output-content" style="color: var(--muted);">Running...</div>`;
+        }
       }
-      if (evt.type === "status") statusDot.textContent = evt.data.trim();
       if (evt.type === "exit") {
         statusDot.textContent = "idle";
         
-        const banner = document.getElementById("statusBanner");
-        const bannerText = document.getElementById("statusBannerText");
-        banner.style.display = "flex";
-        banner.className = evt.status || "success";
+        const { status, output } = evt.data;
+        let html = '';
+        if (status) {
+          html += `<div class="output-status-box"><b>Status :</b> ${status}</div>`;
+        }
+        if (output) {
+          const escaped = output.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+          html += `<div class="output-content">${escaped}</div>`;
+        }
         
-        if (evt.status === "success") bannerText.textContent = "Successfully executed";
-        else if (evt.status === "error") bannerText.textContent = "Runtime error";
-        else if (evt.status === "compile_error") bannerText.textContent = "Compilation error";
-        else if (evt.status === "tle") bannerText.textContent = "Time limit exceeded";
-        else bannerText.textContent = evt.data || "Unknown exit";
-
-        if (term.value.trim() === "") {
-          term.value = "No output";
+        term.innerHTML = html;
+        if (!html) {
+          term.innerHTML = `<div class="output-content" style="color: var(--muted);">No output</div>`;
           term.classList.add("no-output");
         }
+        term.scrollTop = 0;
       }
     });
 
     document.getElementById("runBtn").onclick = () => {
-      document.getElementById("statusBanner").style.display = "none";
       const stdin = document.getElementById("stdinInput").value;
       socket.emit("run", { room, code: editor.getValue(), stdin });
     };

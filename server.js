@@ -206,8 +206,7 @@ function compileAndRun(code, hash, stdin, room, emit) {
     }
 
     if (compileCode !== 0) {
-      emit({ type: "stderr", data: compileErr });
-      emit({ type: "exit", status: "compile_error" });
+      emit({ type: "exit", data: { status: "Compilation error", output: compileErr } });
       fs.rm(tmpDir, { recursive: true, force: true }, () => {});
       return;
     }
@@ -231,33 +230,56 @@ function compileAndRun(code, hash, stdin, room, emit) {
   compile.on("error", (err) => {
     if (roomProcesses[room] !== compile) return;
     delete roomProcesses[room];
-    emit({ type: "stderr", data: `g++ not found: ${err.message}\n` });
+    emit({ type: "exit", data: { status: "Compilation error", output: `g++ not found: ${err.message}` } });
     fs.rm(tmpDir, { recursive: true, force: true }, () => {});
   });
 }
 
 function runBinary(binPath, stdin, room, emit) {
-  const run = spawn(binPath, [], { timeout: 5000 });
+  const run = spawn(binPath, [], { timeout: 5000, killSignal: 'SIGKILL' });
   roomProcesses[room] = run;
   if (stdin) run.stdin.write(stdin);
   run.stdin.end();
 
-  run.stdout.on("data", (d) => emit({ type: "stdout", data: d.toString() }));
-  run.stderr.on("data", (d) => emit({ type: "stderr", data: d.toString() }));
+  let outBuf = "";
+  let lineCount = 0;
+  let killed = false;
+
+  function handleData(d) {
+    if (killed) return;
+    const s = d.toString();
+    outBuf += s;
+    lineCount += (s.match(/\n/g) || []).length;
+    
+    // If output is too massive (e.g., infinite loop), kill it immediately to prevent server freeze
+    if (lineCount > 200 || outBuf.length > 128 * 1024) {
+      killed = true;
+      run.kill("SIGKILL");
+    }
+  }
+
+  run.stdout.on("data", handleData);
+  run.stderr.on("data", handleData);
   run.on("close", (code, signal) => {
     if (roomProcesses[room] !== run) return;
     delete roomProcesses[room];
     
-    let status = "success";
-    if (signal === "SIGTERM") status = "tle";
-    else if (code !== 0) status = "error";
-    
-    emit({ type: "exit", status });
+    if (signal === "SIGTERM" || signal === "SIGKILL") {
+      emit({ type: "exit", data: { status: "Time limit exceeded", output: "" } });
+    } else {
+      let lines = outBuf.split('\n');
+      if (lines.length > 150) {
+        outBuf = lines.slice(0, 150).join('\n') + '\n...';
+      }
+      
+      const statusStr = code === 0 ? "Success" : `Runtime error (exit ${code})`;
+      emit({ type: "exit", data: { status: statusStr, output: outBuf } });
+    }
   });
   run.on("error", (err) => {
     if (roomProcesses[room] !== run) return;
     delete roomProcesses[room];
-    emit({ type: "stderr", data: `Failed to run: ${err.message}\n` });
+    emit({ type: "exit", data: { status: "Failed to run", output: err.message } });
   });
 }
 
