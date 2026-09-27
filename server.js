@@ -50,11 +50,45 @@ const rooms = {};
 const roomProcesses = {};
 const defaultCode = `#include <bits/stdc++.h>\nusing namespace std;\n\nint main() {\n    cout << "Hello, world!" << endl;\n    return 0;\n}\n`;
 
+const ROOMS_DIR = path.join(__dirname, "rooms");
+if (!fs.existsSync(ROOMS_DIR)) fs.mkdirSync(ROOMS_DIR);
+
 function getRoom(roomId) {
   if (!rooms[roomId]) {
-    rooms[roomId] = { code: defaultCode, input: "", users: {} };
+    let savedCode = defaultCode;
+    const roomFile = path.join(ROOMS_DIR, `${roomId}.cpp`);
+    if (fs.existsSync(roomFile)) {
+      savedCode = fs.readFileSync(roomFile, "utf8");
+    }
+    rooms[roomId] = { code: savedCode, input: "", users: {} };
   }
   return rooms[roomId];
+}
+
+function applyDeltasToCode(code, deltas) {
+  let lines = code.split('\n');
+  for (const delta of deltas) {
+    const { action, start, end, lines: deltaLines } = delta;
+    if (action === "insert") {
+      const row = start.row;
+      const col = start.column;
+      if (lines[row] === undefined) throw new Error("Delta insert row out of bounds");
+      const before = lines[row].substring(0, col);
+      const after = lines[row].substring(col);
+      const newLines = [...deltaLines];
+      newLines[0] = before + newLines[0];
+      newLines[newLines.length - 1] += after;
+      lines.splice(row, 1, ...newLines);
+    } else if (action === "remove") {
+      const startRow = start.row, startCol = start.column;
+      const endRow = end.row, endCol = end.column;
+      if (lines[startRow] === undefined || lines[endRow] === undefined) throw new Error("Delta remove row out of bounds");
+      const before = lines[startRow].substring(0, startCol);
+      const after = lines[endRow].substring(endCol);
+      lines.splice(startRow, endRow - startRow + 1, before + after);
+    }
+  }
+  return lines.join('\n');
 }
 
 const COLORS = ["#5b8dfc", "#f2994a", "#27ae60", "#eb5757", "#9b51e0", "#2d9cdb"];
@@ -76,10 +110,25 @@ io.on("connection", (socket) => {
     socket.to(currentRoom).emit("system", `${r.users[socket.id].name} joined`);
   });
 
-  socket.on("edit", ({ room, code, cursor }) => {
+  socket.on("edit", ({ room, deltas, fullCodeFallback, cursor }) => {
     const r = getRoom(room);
-    r.code = code;
-    socket.to(room).emit("edit", { code, from: socket.id, cursor });
+    if (deltas && deltas.length > 0) {
+      try {
+        r.code = applyDeltasToCode(r.code, deltas);
+        fs.writeFileSync(path.join(ROOMS_DIR, `${room}.cpp`), r.code);
+      } catch (err) {
+        console.error("Delta apply failed, falling back", err);
+        if (fullCodeFallback) {
+          r.code = fullCodeFallback;
+          fs.writeFileSync(path.join(ROOMS_DIR, `${room}.cpp`), r.code);
+        }
+      }
+      socket.to(room).emit("edit", { deltas, from: socket.id, cursor });
+    } else if (fullCodeFallback !== undefined) {
+      r.code = fullCodeFallback;
+      fs.writeFileSync(path.join(ROOMS_DIR, `${room}.cpp`), r.code);
+      socket.to(room).emit("edit", { fullCode: fullCodeFallback, from: socket.id, cursor });
+    }
   });
 
   socket.on("input", ({ room, input }) => {
@@ -149,13 +198,29 @@ function compileAndRun(code, hash, stdin, room, emit) {
   compile.stderr.on("data", (d) => (compileErr += d.toString()));
 
   compile.on("close", (compileCode) => {
+    if (roomProcesses[room] !== compile) {
+      // Process was killed by a newer run request for the same room.
+      // Clean up the temp dir and ignore the event.
+      fs.rm(tmpDir, { recursive: true, force: true }, () => {});
+      return;
+    }
+
     if (compileCode !== 0) {
       emit({ type: "stderr", data: compileErr });
       emit({ type: "exit", data: `Compilation failed (exit ${compileCode})\n` });
       fs.rm(tmpDir, { recursive: true, force: true }, () => {});
       return;
     }
-    // Store in cache
+
+    // Store in cache or use concurrent existing cache
+    if (binaryCache.has(hash)) {
+      fs.rm(tmpDir, { recursive: true, force: true }, () => {});
+      const cached = binaryCache.get(hash);
+      emit({ type: "status", data: "Running…" });
+      runBinary(cached.binPath, stdin, room, emit);
+      return;
+    }
+
     binaryCache.set(hash, { binPath, tmpDir });
     evictOldCache();
 
@@ -164,6 +229,7 @@ function compileAndRun(code, hash, stdin, room, emit) {
   });
 
   compile.on("error", (err) => {
+    if (roomProcesses[room] !== compile) return;
     delete roomProcesses[room];
     emit({ type: "stderr", data: `g++ not found: ${err.message}\n` });
     fs.rm(tmpDir, { recursive: true, force: true }, () => {});
@@ -179,6 +245,7 @@ function runBinary(binPath, stdin, room, emit) {
   run.stdout.on("data", (d) => emit({ type: "stdout", data: d.toString() }));
   run.stderr.on("data", (d) => emit({ type: "stderr", data: d.toString() }));
   run.on("close", (code, signal) => {
+    if (roomProcesses[room] !== run) return;
     delete roomProcesses[room];
     emit({
       type: "exit",
@@ -188,6 +255,7 @@ function runBinary(binPath, stdin, room, emit) {
     });
   });
   run.on("error", (err) => {
+    if (roomProcesses[room] !== run) return;
     delete roomProcesses[room];
     emit({ type: "stderr", data: `Failed to run: ${err.message}\n` });
   });

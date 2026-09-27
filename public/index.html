@@ -354,11 +354,12 @@
 
     .gutter.gutter-horizontal {
       cursor: col-resize;
-      background-image: linear-gradient(to bottom, var(--panel) 43px, var(--border) 43px);
+      background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="6" height="30"><circle cx="1.5" cy="3" r="1.2" fill="%23868c99"/><circle cx="4.5" cy="3" r="1.2" fill="%23868c99"/><circle cx="1.5" cy="9" r="1.2" fill="%23868c99"/><circle cx="4.5" cy="9" r="1.2" fill="%23868c99"/><circle cx="1.5" cy="15" r="1.2" fill="%23868c99"/><circle cx="4.5" cy="15" r="1.2" fill="%23868c99"/><circle cx="1.5" cy="21" r="1.2" fill="%23868c99"/><circle cx="4.5" cy="21" r="1.2" fill="%23868c99"/><circle cx="1.5" cy="27" r="1.2" fill="%23868c99"/><circle cx="4.5" cy="27" r="1.2" fill="%23868c99"/></svg>');
     }
 
     .gutter.gutter-vertical {
       cursor: row-resize;
+      background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="30" height="6"><circle cx="3" cy="1.5" r="1.2" fill="%23868c99"/><circle cx="3" cy="4.5" r="1.2" fill="%23868c99"/><circle cx="9" cy="1.5" r="1.2" fill="%23868c99"/><circle cx="9" cy="4.5" r="1.2" fill="%23868c99"/><circle cx="15" cy="1.5" r="1.2" fill="%23868c99"/><circle cx="15" cy="4.5" r="1.2" fill="%23868c99"/><circle cx="21" cy="1.5" r="1.2" fill="%23868c99"/><circle cx="21" cy="4.5" r="1.2" fill="%23868c99"/><circle cx="27" cy="1.5" r="1.2" fill="%23868c99"/><circle cx="27" cy="4.5" r="1.2" fill="%23868c99"/></svg>');
     }
 
     #terminalPane {
@@ -431,13 +432,21 @@
     }
 
     ::-webkit-scrollbar {
-      width: 10px;
-      height: 10px;
+      width: 6px;
+      height: 6px;
     }
 
     ::-webkit-scrollbar-thumb {
-      background: var(--border);
-      border-radius: 5px;
+      background: transparent;
+      border-radius: 0;
+    }
+
+    *:hover::-webkit-scrollbar-thumb {
+      background: rgba(0, 0, 0, 0.4);
+    }
+
+    *:hover::-webkit-scrollbar-thumb:hover {
+      background: rgba(0, 0, 0, 0.8);
     }
 
     ::-webkit-scrollbar-track {
@@ -750,6 +759,8 @@
     const shareContainer = document.getElementById("shareContainer");
     const copyShareLinkBtn = document.getElementById("copyShareLinkBtn");
     const shareLinkInput = document.getElementById("shareLinkInput");
+    
+    shareLinkInput.value = location.href;
 
     document.getElementById("shareContainer").onmouseenter = () => {
       shareContainer.classList.add("force-open");
@@ -795,6 +806,9 @@
       // Save current link to history if it exists
       if (shareLinkInput.value) addPrevLink(shareLinkInput.value);
       btn.innerText = "Generating...";
+      
+      const currentCode = editor.getValue();
+      
       setTimeout(() => {
         const newRoom = Math.random().toString(36).substring(2, 9);
         sessionStorage.setItem("cide-owned-room", newRoom);
@@ -805,7 +819,12 @@
         room = newRoom;
         roleText.innerText = "own";
         leaveBtn.style.display = "none";
+        
         socket.emit("join", { room, name });
+        // Fork the current code into the new room!
+        socket.emit("edit", { room, deltas: [], fullCodeFallback: currentCode });
+        editor.setValue(currentCode, -1);
+        
         btn.innerText = "New link?";
       }, 400);
     };
@@ -830,7 +849,7 @@
           setTimeout(() => socket.emit("edit", { room, code: finalCode }), 100);
         }
       }
-      editor.setValue(finalCode, -1);
+      editor.setValue(finalCode || "", -1);
       applyingRemote = false;
 
       if (input !== undefined) {
@@ -851,22 +870,31 @@
       stdinEl.value = input;
     });
 
-    socket.on("edit", ({ code }) => {
+    socket.on("edit", ({ deltas, fullCode }) => {
       applyingRemote = true;
-      const cursor = editor.getCursorPosition();
-      editor.setValue(code, -1);
-      editor.moveCursorToPosition(cursor);
-      editor.clearSelection();
+      if (deltas && deltas.length > 0) {
+        editor.session.getDocument().applyDeltas(deltas);
+      } else if (fullCode !== undefined) {
+        const cursor = editor.getCursorPosition();
+        editor.setValue(fullCode, -1);
+        editor.moveCursorToPosition(cursor);
+        editor.clearSelection();
+      }
       applyingRemote = false;
     });
 
     let editTimeout;
-    editor.session.on("change", () => {
+    let pendingDeltas = [];
+    editor.session.on("change", (delta) => {
       if (applyingRemote) return;
+      pendingDeltas.push(delta);
       clearTimeout(editTimeout);
       editTimeout = setTimeout(() => {
-        socket.emit("edit", { room, code: editor.getValue() });
-      }, 150);
+        if (pendingDeltas.length > 0) {
+          socket.emit("edit", { room, deltas: pendingDeltas, fullCodeFallback: editor.getValue() });
+          pendingDeltas = [];
+        }
+      }, 50);
     });
 
     socket.on("users", (users) => {
@@ -980,7 +1008,7 @@
     // ---------- Split.js ----------
     Split(['#editorContainer', '#terminalPane'], {
       sizes: [60, 40],
-      minSize: [200, 200],
+      minSize: [500, 280],
       gutterSize: 6,
       cursor: 'col-resize',
       onDrag: () => editor.resize()
