@@ -242,19 +242,12 @@ function runBinary(binPath, stdin, room, emit) {
   run.stdin.end();
 
   let outBuf = "";
-  let lineCount = 0;
-  let killed = false;
 
   function handleData(d) {
-    if (killed) return;
-    const s = d.toString();
-    outBuf += s;
-    lineCount += (s.match(/\n/g) || []).length;
-    
-    // If output is too massive (e.g., infinite loop), kill it immediately to prevent server freeze
-    if (lineCount > 200 || outBuf.length > 128 * 1024) {
-      killed = true;
-      run.kill("SIGKILL");
+    // Stop appending to buffer after a reasonable amount to avoid OOM, 
+    // but do not kill the process early. Let the 5 second timeout handle it.
+    if (outBuf.length < 50000) {
+      outBuf += d.toString();
     }
   }
 
