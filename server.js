@@ -265,7 +265,7 @@ function runBinary(binPath, stdin, room, emit) {
         outBuf = lines.slice(0, 150).join('\n') + '\n...';
       }
       
-      const statusStr = code === 0 ? "Success" : `Runtime error (exit ${code})`;
+      const statusStr = code === 0 ? "Successfully executed" : `Runtime error (exit ${code})`;
       emit({ type: "exit", data: { status: statusStr, output: outBuf } });
     }
   });
