@@ -207,7 +207,7 @@ function compileAndRun(code, hash, stdin, room, emit) {
 
     if (compileCode !== 0) {
       emit({ type: "stderr", data: compileErr });
-      emit({ type: "exit", data: `Compilation failed (exit ${compileCode})\n` });
+      emit({ type: "exit", status: "compile_error" });
       fs.rm(tmpDir, { recursive: true, force: true }, () => {});
       return;
     }
@@ -237,7 +237,7 @@ function compileAndRun(code, hash, stdin, room, emit) {
 }
 
 function runBinary(binPath, stdin, room, emit) {
-  const run = spawn(binPath, [], { timeout: 8000 });
+  const run = spawn(binPath, [], { timeout: 5000 });
   roomProcesses[room] = run;
   if (stdin) run.stdin.write(stdin);
   run.stdin.end();
@@ -247,12 +247,12 @@ function runBinary(binPath, stdin, room, emit) {
   run.on("close", (code, signal) => {
     if (roomProcesses[room] !== run) return;
     delete roomProcesses[room];
-    emit({
-      type: "exit",
-      data: signal
-        ? `\nTerminated (${signal}) — likely timeout or infinite loop\n`
-        : `\nProcess exited with code ${code}\n`,
-    });
+    
+    let status = "success";
+    if (signal === "SIGTERM") status = "tle";
+    else if (code !== 0) status = "error";
+    
+    emit({ type: "exit", status });
   });
   run.on("error", (err) => {
     if (roomProcesses[room] !== run) return;
